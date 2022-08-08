@@ -1,177 +1,101 @@
-# OpenVino-on-Aarch64
+# Build custom Intel® Distribution of OpenVINO™ toolkit Docker image
+This repository folder contains the Dockerfile to build a docker image with the Intel® Distribution of OpenVINO™ toolkit.  
 
-## Abstraction
+## Components
+* [OpenVINO™ Toolkit - Deep Learning Deployment Toolkit repository](https://github.com/openvinotoolkit/openvino)
+* [OpenCV: Open Source Computer Vision Library](https://github.com/opencv/opencv)
+* [OpenVINO™ Toolkit - Open Model Zoo repository](https://github.com/openvinotoolkit/open_model_zoo)
 
-### Intel OpenVino is a common toolset in the computer vision and machine learning field which provides straightforward and well-structured inference API and optimization tools.
-
-### While the existing issue is that the intel does not happy to publish the ARM64 pre-built OpenVino packages for some unknown reason. 
-
-### The motivation of this workaround is createing an automated continuous integration pipeline which defines the process to build OpenVino 2021.4+ ARM64 Docker image based on Ubuntu 20.04 LTS system in Aarch64 Architecture.
-
-### The performance of docker is closed to native in various aspects e.g. CPU, Disk .and the docker adapted flexibility while building image on huge VM and running on the edges. 
-
-https://dominoweb.draco.res.ibm.com/reports/rc25482.pdf
-
-## Infrastructure Flow Diagram
-
-![OpenVino-on-Aarch64-Page-2.drawio (2)](https://minio.llycloud.com/image/uPic/image-20220114pUqDFC.png)
-
-1. Commit the Infrastructure Code to Gitalb Instance in order to build OpenVino on Aarch64.
-   The Dockerfile for build OenVino On Aarch64 is modified and captured from [OpenVino Docker-CI official Repository](https://github.com/openvinotoolkit/docker_ci/tree/master/dockerfiles/ubuntu20/build_custom)
-
-2. Build OpenVino on Aarch64 Image on Cloud VM, the Oracle Cloud has been used. The VM is leveraged by Oracle Cloud Always Free Tier.
-   The VM have 4 A1 CPU (Arm), 24 GB memory, 200 GB Disk.
-   
-   https://www.oracle.com/au/cloud/free/
-
-   The Runner configures with docker executor and use DIND (docker in docker topology) to build image.
-   [https://docs.gitlab.com/runner/executors/docker.html ](https://docs.gitlab.com/runner/executors/docker.html)
-
-3. Push the OpenVino on Aarch64 image to the self-hosted [gitlab container registry](https://docs.gitlab.com/ee/user/packages/container_registry/).
-
-4. Pull the image from gitlab container registry on edge device (Raspberry Pi).
-   ~~As the project in state of internal, only authorized user could pull this image.~~
-   As approved by higher management, all of the procedures in this repositories is under general purpose practice, therefore the visibility of this repository has been changed to public. All of user could access pre-built image from ghcr.io (Github public container registry)
-   
-5. Run the image as a container on edge device (Raspberry Pi) and perform the Openvino object detection operations.
-
-## Getting Start
-
-### Installation
-
-#### STEP 1 : Install OS
-
-##### Download and Install Ubuntu 20.04.2.0 LTS `ARM64`
-
-[HERE](https://cdimage.ubuntu.com/releases/20.04/release/ubuntu-20.04.3-live-server-arm64.iso) to donwload Ubuntu 20.04.2.0 LTS ISO image ` ARM64`
-
-##### Install Ubuntu 20.04
-
-[HERE](https://phoenixnap.com/kb/install-ubuntu-20-04) is a guide for Ubuntu installation.
-
-#### STEP 2 : Install Docker
-
-
-```sh
-sudo apt update
-sudo apt-get update
-sudo apt-get install docker.io
+## How to build
+Go to the folder with the Dockerfile and run:
+```
+docker build -t [image:tag] .
 ```
 
-Inorder to run as non-root user, you have to run commands below.
+* `/opt/intel/openvino` folder will contain OpenVINO build
+* `/opt/intel/repo` will contain OpenVINO™ and OpenCV git repositories in `openvino` and `opencv` folders accordingly.
 
-```sh
-sudo usermod -aG docker $USER
+
+If you want to rebuild the entire image, use the docker `--no-cache` option:
+```
+docker build --no-cache -t image:tag .
 ```
 
-If you still have some problem about permission. Try with
+You can use the docker `--build-arg` option to override the following variables:  
+* `OPENVINO_FORK` - To specify a GitHub fork of the OpenVINO repository to use. By default, it is main OpenVINO repository.  
+* `OPENVINO_BRANCH`, `OPENCV_BRANCH`, `OMZ_BRANCH` - To specify branches with source code. By default, they are equal to "master".  
+* `BUILD_OPENCV_CONTRIB` - If set to `yes`, OpenCV will be built with extra modules (default is `no`). You can use the `OPENCV_CONTRIB_BRANCH` argument to specify a branch in the `opencv_contrib` repository.  
+* `OCL_VERSION` - To specify the version of Intel® Graphics Compute Runtime for OpenCL™ Driver on Linux. By default, it is equal to "19.41.14441".
 
-```sh
-sudo chmod 777 /var/run/docker.sock
+**For example**:  
+This command builds an image with OpenVINO™ 2021.2 release.
+```
+docker build -t openvino:2021.2 --build-arg OPENVINO_BRANCH="releases/2021/2" .
 ```
 
-#### STEP 3 : Pull Docker image
+You can manually set up cmake parameters to build a custom package from source code using these files:  
+* [openvino_cmake.txt](openvino_cmake.txt)
+* [opencv_cmake.txt](opencv_cmake.txt)
 
-**For public access**
+>**Note**:  
+By default, these files already contain some parameters for *Debug* build  
+Do not override PATH/PREFIX options. This can break a build of package.
 
-```sh
-export OpenVino_on_Aarch64_Image=ghcr.io/uaws/openvino-on-aarch64:latest
+### Build stages
+The docker image is built using a multi-step build:
+1. **setup_openvino**  
+    Clone OpenVINO™ git repository with submodules and install build dependencies.  
+    Open Model Zoo will be included as a submodule of OpenVINO.
+2. **build_openvino**  
+    Build OpenVINO™ (CPU, iGPU, VPU support) with the parameters specified in openvino_cmake.txt.  
+    It does not include OpenCV.  
+3. **copy_openvino**  
+    Copy OpenVINO™ build to clear Ubuntu:20.04 image.
+4. **openvino**  
+    Install OpenVINO™ dependencies. Now you can use it.
+5. **opencv**  
+    Build and setup OpenCV with the parameters specified in opencv_cmake.txt.  
+    OpenCV can be optionally built with extra modules (see the `BUILD_OPENCV_CONTRIB` argument description above).
+
+Use the docker `--target` option to specify a final stage.
+```
+docker build --target [stage] -t [image:tag] .
 ```
 
-<details>
-<summary>For Internal access</summary>
-
-```sh
-export OpenVino_on_Aarch64_Image=gitlab-registry.dev.vmv.re/akideliu/openvino-on-aarch64:latest
+**For example**:  
+This command builds an image without OpenCV.
+```
+docker build --target openvino -t ie:latest .
 ```
 
-You need to make sure you have the access to the self-hosted gitlab container registry. Then Login to the registry.
-
-https://gitlab.dev.vmv.re/AkideLiu/openvino-on-aarch64/container_registry
-
-```sh
-sudo docker login gitlab-registry.dev.vmv.re
+## How to test
+You can use our default pipeline to test your image:
+```
+python3 docker_openvino.py test -t [image:tag] -dist custom 
 ```
 
-</details>
+>**Note**:  
+Docker CI framework automatically runs the corresponding tests.  
+By default, the product version is equal to the latest release version. Use `-p` to override this.
 
-Pull the latest version image
+## How to run
+Please follow the [Run built image](../get-started.md#run-built-image) section in Docker CI getting started guide.
 
-```sh
-sudo docker pull $OpenVino_on_Aarch64_Image
-```
+## Prebuilt images
 
-#### STEP 4 : Run Docker image
-
-#### Pre-requirements: you need set proper x11 forwarding on the both Client and edge system in order to retrieve the GUI functionality, and `xauth` packages needs to be installed via `apt` or `brew` 
-
-```sh
-sudo docker run -it \
-   --privileged \
-   -v /dev/video0:/dev/video0  \
-   -v /tmp/.X11-unix:/tmp/.X11-unix \
-   -e DISPLAY=$DISPLAY \
-   --device-cgroup-rule='c 189:* rmw' \
-   -v /dev/bus/usb:/dev/bus/usb  \
-   -v $HOME/.Xauthority:/root/.Xauthority \
-   -d --net=host $OpenVino_on_Aarch64_Image
-```
-
-- `-it` : For interactive processes (like a shell), you must use `-i -t` together in order to allocate a tty for the container process. `-i -t` is often written `-it` as you’ll see in later examples
-- `--privileged` :  Give extended privileges to this container, in order to access host devices, camera and NCS2
-- `-v /dev/video0:/dev/video0` : mapping the hosting video0 camera device to container
-- `-v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=$DISPLAY` : x11 forwarding application docker support. This setting will allow to display graphic user interface to view the real time object detection.
-- `-device-cgroup-rule='c 189:* rmw'` : NCS2 rules
-- `-v /dev/bus/usb:/dev/bus/usb` mapping the hosting usb device (NCS2) to container
-- `-v $HOME/.Xauthority:/root/.Xauthority` mapping the Xauthority from edge device into docker
-- `-d` run on daemon
-- `--net=host` support x11 for docker
-
-reference docs:
-
-https://docs.docker.com/engine/reference/run/
-
-https://hub.docker.com/r/openvino/ubuntu20_dev
-
-https://gist.github.com/sorny/969fe55d85c9b0035b0109a31cbcb088
-
-### STEP 5 : Run Pre-built Sample application 
-
-Run `sudo docker ps` to retrieve the container ID, in following example, the container ID is `8060f370a6cb`
-
-```sh
-(openvino) ubuntu@pi-home-01:~$ sudo docker ps
-CONTAINER ID   IMAGE                                                     COMMAND        CREATED       STATUS       PORTS                                                                                          NAMES
-8060f370a6cb   gitlab-registry.dev.vmv.re/akideliu/openvino-on-aarch64   "/bin/bash"    6 hours ago   Up 6 hours                                                                                                    crazy_satoshi
-```
-
-Step into the OpenVino container
-
-```sh
-docker exec -it CONTAINER_ID /bin/bash
-```
-
-Run the pre-build Open Model Zoo demo
-
-```sh
-cd ~/omz_demos_build/aarch64/Release/
-
-./security_barrier_camera_demo \
-   -d MYRIAD -d_va MYRIAD -d_lpr MYRIAD -nc 1 \
-   -m /opt/intel/openvino/demos/security_barrier_camera_demo/cpp/intel/vehicle-license-plate-detection-barrier-0106/FP16/vehicle-license-plate-detection-barrier-0106.xml \
-   -m_lpr /opt/intel/openvino/demos/security_barrier_camera_demo/cpp/intel/license-plate-recognition-barrier-0001/FP16/license-plate-recognition-barrier-0001.xml  \
-   -m_va /opt/intel/openvino/demos/security_barrier_camera_demo/cpp/intel/vehicle-attributes-recognition-barrier-0039/FP16/vehicle-attributes-recognition-barrier-0039.xml
-
-```
-
-https://github.com/openvinotoolkit/open_model_zoo/tree/master/demos/security_barrier_camera_demo/cpp
+Prebuilt images are available on: 
+- [Docker Hub](https://hub.docker.com/u/openvino)
+- [Red Hat* Quay.io](https://quay.io/organization/openvino)
+- [Red Hat* Ecosystem Catalog](https://catalog.redhat.com/software/containers/intel/openvino-runtime/606ff4d7ecb5241699188fb3)
 
 
+## License
+This Dockerfile contains third-party components with different licenses.  
+If you are distributing the container as a whole, then you are responsible for license compliance for all of the software it contains.
 
-![image-20220114014730915](https://minio.llycloud.com/image/uPic/image-2022011477ir89.png)
-
-## Acknowledgement
-
-1. Oracle Cloud Always Free Tier
-2. Gitlab Self Host Chart Edition
-3. OpenVino Docker CI
+## Documentation
+* [Install Intel® Distribution of OpenVINO™ toolkit for Linux* from a Docker* Image](https://docs.openvinotoolkit.org/latest/openvino_docs_install_guides_installing_openvino_docker_linux.html)
+* [Install Intel® Distribution of OpenVINO™ toolkit for Windows* from Docker* Image](https://docs.openvinotoolkit.org/latest/openvino_docs_install_guides_installing_openvino_docker_windows.html)
+* [Official Dockerfile reference](https://docs.docker.com/engine/reference/builder/)
+---
+\* Other names and brands may be claimed as the property of others.
